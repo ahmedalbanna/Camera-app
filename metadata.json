@@ -1,0 +1,6 @@
+{
+  "name": "العدسة",
+  "description": "تطبيق كاميرا متكامل واحترافي يدعم التقاط الصور، تسجيل الفيديو، التحكم بالفلاش والتبديل بين الكاميرات بواجهة عربية أنيقة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

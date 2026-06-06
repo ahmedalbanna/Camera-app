@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Camera Outer Body -->
+    <path
+        android:fillColor="#E2E8F0"
+        android:pathData="M 24,40 C 24,37 27,34 30,34 H 42 L 46,28 H 62 L 66,34 H 78 C 81,34 84,37 84,40 V 74 C 84,77 81,80 78,80 H 30 C 27,80 24,77 24,74 Z" />
+
+    <!-- Top Plate Small Hotshoe Detail -->
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M 48,28 H 60 V 30 H 48 Z" />
+
+    <!-- Red Recording Indicator / LED Flash -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M 74,44 C 74,42.9 74.9,42 76,42 C 77.1,42 78,42.9 78,44 C 78,45.1 77.1,46 76,46 C 74.9,46 74,45.1 74,44 Z" />
+
+    <!-- Golden Lens Hub Selector Outer Rim -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M 54,37 C 43,37 34,46 34,57 C 34,68 43,77 54,77 C 65,77 74,68 74,57 C 74,46 65,37 54,37 Z" />
+
+    <!-- Camera Lens Inner Glass (Deep Cyan/Teal Flare effect) -->
+    <path
+        android:pathData="M 54,40 C 44.6,40 37,47.6 37,57 C 37,66.4 44.6,74 54,74 C 63.4,74 71,66.4 71,57 C 71,47.6 63.4,40 54,40 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="57"
+                android:gradientRadius="17">
+                <item android:offset="0.0" android:color="#0EA5E9" /> <!-- Bright cyan glass center -->
+                <item android:offset="0.7" android:color="#0369A1" /> <!-- Blue glass -->
+                <item android:offset="1.0" android:color="#0F172A" /> <!-- Very dark slate edge -->
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Golden Aperture Inner Circle -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M 54,49 C 49.6,49 46,52.6 46,57 C 46,61.4 49.6,65 54,65 C 58.4,65 62,61.4 62,57 C 62,52.6 58.4,49 54,49 Z" />
+
+    <!-- Lens Reflection Flare (Sleek diagonal white shine) -->
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M 43,46 C 45,43 51,43 54,45 C 55,46 51,49 48,49 C 45,49 43,47 43,46 Z" />
+</vector>
