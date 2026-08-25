@@ -4,11 +4,12 @@ import android.app.RecoverableSecurityException
 import android.content.IntentSender
 import android.net.Uri
 import android.util.Log
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -97,22 +98,28 @@ fun MediaViewer(
                 val isVideoFile = isVideoUri(context, fileUri)
 
                 if (isVideoFile) {
+                    // Phase 2: ExoPlayer with loop + seek
+                    val exoPlayer = remember(fileUri) {
+                        ExoPlayer.Builder(context).build().apply {
+                            setMediaItem(MediaItem.fromUri(fileUri))
+                            repeatMode = ExoPlayer.REPEAT_MODE_ONE
+                            prepare()
+                            playWhenReady = true
+                        }
+                    }
+                    androidx.compose.runtime.DisposableEffect(fileUri) {
+                        onDispose { exoPlayer.release() }
+                    }
                     AndroidView(
                         factory = { ctx ->
-                            VideoView(ctx).apply {
-                                setVideoURI(fileUri)
-                                val mc = MediaController(ctx)
-                                mc.setAnchorView(this)
-                                setMediaController(mc)
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = true
-                                    start()
-                                }
+                            PlayerView(ctx).apply {
+                                player = exoPlayer
+                                useController = true
+                                controllerShowTimeoutMs = 3000
                             }
                         },
                         update = { view ->
-                            view.setVideoURI(fileUri)
-                            view.start()
+                            if (view.player != exoPlayer) view.player = exoPlayer
                         },
                         modifier = Modifier.fillMaxSize()
                     )

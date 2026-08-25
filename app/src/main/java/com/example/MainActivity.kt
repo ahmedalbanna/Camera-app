@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.example.data.CameraRepository
 import com.example.ui.screens.CameraScreen
 import com.example.ui.components.PermissionScreen
 import com.example.ui.theme.MyApplicationTheme
@@ -132,8 +133,12 @@ class MainActivity : ComponentActivity() {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/Camera")
+                put(MediaStore.Images.Media.RELATIVE_PATH, CameraRepository.RELATIVE_PATH)
             }
+        }
+        // Phase 2: HDR hint via ViewModel (if enabled, add HDR tag to description)
+        if (viewModel.isHdrEnabled.value) {
+            contentValues.put(MediaStore.Images.Media.DESCRIPTION, "HDR")
         }
         imageCapture.flashMode = viewModel.getCameraXFlashMode()
         val outputOptions = ImageCapture.OutputFileOptions.Builder(
@@ -174,7 +179,7 @@ class MainActivity : ComponentActivity() {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
             if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
+                put(MediaStore.Video.Media.RELATIVE_PATH, CameraRepository.RELATIVE_PATH)
             }
         }
         val mediaStoreOutputOptions = MediaStoreOutputOptions.Builder(

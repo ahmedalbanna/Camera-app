@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,7 +25,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,7 +38,9 @@ import com.example.CameraPreview
 import com.example.CameraViewModel
 import com.example.ui.components.ControlDeck
 import com.example.ui.components.ExposureSlider
+import com.example.ui.components.HorizonLevel
 import com.example.ui.components.MediaViewer
+import com.example.ui.components.ProControls
 import com.example.ui.components.TopBar
 import kotlinx.coroutines.delay
 
@@ -60,11 +62,18 @@ fun CameraScreen(
     val isFlashMenuVisible by viewModel.isFlashMenuVisible.collectAsStateWithLifecycle()
     val showShotAnimation by viewModel.showShotAnimation.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val aperture by viewModel.aperture.collectAsStateWithLifecycle()
+    val isHdrEnabled by viewModel.isHdrEnabled.collectAsStateWithLifecycle()
+    val manualFocus by viewModel.manualFocusDistance.collectAsStateWithLifecycle()
+    val panoramaProgress by viewModel.panoramaProgress.collectAsStateWithLifecycle()
+    val isGalleryOpen by viewModel.isGalleryOpen.collectAsStateWithLifecycle()
+    val isPortraitAvailable by viewModel.isPortraitExtensionAvailable.collectAsStateWithLifecycle()
 
     var imageCaptureInstance by remember { mutableStateOf<ImageCapture?>(null) }
     var videoCaptureInstance by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
 
     var isViewerOpen by remember { mutableStateOf(false) }
+    var viewerUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var showGridLines by remember { mutableStateOf(false) }
     var announcementText by remember { mutableStateOf<String?>(null) }
     var rotationAngle by remember { mutableStateOf(0f) }
@@ -88,8 +97,14 @@ fun CameraScreen(
         }
     }
 
+    // Open viewer for last captured when gallery item clicked
+    fun openViewer(uri: android.net.Uri) {
+        viewerUri = uri
+        isViewerOpen = true
+    }
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        // Camera preview
+        // Camera preview — Phase 2: pro params + extension probe
         CameraPreview(
             cameraSelector = cameraSelector,
             cameraMode = cameraMode,
@@ -100,6 +115,10 @@ fun CameraScreen(
             onVideoCaptureReady = { videoCaptureInstance = it },
             onExposureRangeChanged = { exposureRange = it },
             onZoomRangeChanged = { zoomRange = it },
+            aperture = aperture,
+            isHdrEnabled = isHdrEnabled,
+            manualFocusDistance = manualFocus,
+            onExtensionsAvailability = { portrait, panorama -> viewModel.setExtensionAvailability(portrait, panorama) },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -128,7 +147,62 @@ fun CameraScreen(
             Box(modifier = Modifier.size(16.dp).align(Alignment.BottomEnd).border(2.dp, Color(0xFFFBBF24), RoundedCornerShape(bottomEnd = 8.dp)))
         }
 
-        // Exposure slider — now extracted
+        // Horizon level for Panorama
+        HorizonLevel(
+            enabled = cameraMode == com.example.CameraMode.PANORAMA,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 110.dp)
+        )
+
+        // Panorama progress bar
+        if (cameraMode == com.example.CameraMode.PANORAMA) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 150.dp)
+                    .size(width = 200.dp, height = 6.dp)
+                    .background(Color.White.copy(alpha = 0.25f), RoundedCornerShape(3.dp))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFFFBBF24), RoundedCornerShape(3.dp))
+                        .padding(0.dp)
+                )
+                // Simple sweep progress simulation
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize(fraction = panoramaProgress)
+                        .background(Color(0xFFFBBF24), RoundedCornerShape(3.dp))
+                )
+            }
+            // Auto simulate sweep when in panorama and not yet finished
+            LaunchedEffect(cameraMode) {
+                if (cameraMode == com.example.CameraMode.PANORAMA) {
+                    viewModel.setPanoramaProgress(0f)
+                    for (i in 1..100) {
+                        delay(80)
+                        if (viewModel.cameraMode.value != com.example.CameraMode.PANORAMA) break
+                        viewModel.setPanoramaProgress(i / 100f)
+                    }
+                }
+            }
+        }
+
+        // Portrait bokeh hint
+        if (cameraMode == com.example.CameraMode.PORTRAIT) {
+            val hint = if (isPortraitAvailable == true) "تم تفعيل تمويه الخلفية" else "تمويه برمجي (الجهاز لا يدعم BOKEH)"
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 100.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(text = hint, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+
+        // Exposure slider — hidden in PRO? keep visible but ProControls below handles more
         ExposureSlider(
             exposureIndex = exposureIndex,
             exposureRange = exposureRange,
@@ -172,6 +246,19 @@ fun CameraScreen(
             }
         }
 
+        // Pro controls overlay — Phase 2
+        if (cameraMode == com.example.CameraMode.PRO) {
+            ProControls(
+                aperture = aperture,
+                isHdrEnabled = isHdrEnabled,
+                manualFocus = manualFocus,
+                onApertureChange = { viewModel.setAperture(it) },
+                onHdrToggle = { viewModel.toggleHdr() },
+                onManualFocusChange = { viewModel.setManualFocus(it) },
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 16.dp).padding(bottom = 320.dp)
+            )
+        }
+
         // Bottom control deck
         ControlDeck(
             cameraMode = cameraMode,
@@ -183,9 +270,17 @@ fun CameraScreen(
             onSetZoomRatio = { viewModel.setZoomRatio(it) },
             onSetCameraMode = { viewModel.setCameraMode(it) },
             onAnnounce = { announcementText = it },
-            onGalleryClick = { if (lastCapturedUri != null) isViewerOpen = true },
+            onGalleryClick = { viewModel.setGalleryOpen(true) },
             onShutterClick = {
-                if (cameraMode == com.example.CameraMode.PHOTO) onTakePhoto(imageCaptureInstance) else onToggleVideo(videoCaptureInstance)
+                if (cameraMode == com.example.CameraMode.VIDEO) {
+                    onToggleVideo(videoCaptureInstance)
+                } else {
+                    // For panorama, simulate announcement
+                    if (cameraMode == com.example.CameraMode.PANORAMA) {
+                        announcementText = "تم التقاط إطار بانورامي — اسحب ببطء"
+                    }
+                    onTakePhoto(imageCaptureInstance)
+                }
             },
             onToggleCamera = {
                 rotationAngle += 180f
@@ -195,13 +290,22 @@ fun CameraScreen(
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // Fullscreen viewer
+        // Fullscreen viewer for single item (last or gallery selection)
         MediaViewer(
             isVisible = isViewerOpen,
-            uri = lastCapturedUri,
+            uri = viewerUri ?: lastCapturedUri,
             viewModel = viewModel,
-            onClose = { isViewerOpen = false },
+            onClose = { isViewerOpen = false; viewerUri = null },
             modifier = Modifier.fillMaxSize()
         )
+
+        // Gallery grid — Phase 2
+        if (isGalleryOpen) {
+            GalleryScreen(
+                onItemClick = { uri -> openViewer(uri) },
+                onClose = { viewModel.setGalleryOpen(false) },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }

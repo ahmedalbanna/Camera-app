@@ -70,12 +70,13 @@ secrets {
   defaultPropertiesFileName = ".env.example"
 }
 
-// Phase 1.3: accompanist.permissions removed — migrated to ActivityResult
+// Phase 2: Pro camera deps: extensions (Portrait), media3 (ExoPlayer), paging (Gallery)
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.camera.camera2)
   implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.extensions)
   implementation(libs.androidx.camera.lifecycle)
   implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
@@ -94,6 +95,11 @@ dependencies {
   // implementation(libs.androidx.room.ktx)
   // implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
+  implementation(libs.media3.common)
+  implementation(libs.media3.exoplayer)
+  implementation(libs.media3.ui)
+  implementation(libs.androidx.paging.runtime)
+  implementation(libs.androidx.paging.compose)
   // implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai) — re-enable for v2 Gemini
   implementation(libs.kotlinx.coroutines.android)

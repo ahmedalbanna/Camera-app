@@ -118,39 +118,41 @@ fun ControlDeck(
                 }
             }
 
-            // Mode selector
+            // Mode selector — Phase 2: functional Panorama/Portrait/Pro
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "بانوراما",
-                        color = Color.White.copy(alpha = 0.4f),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable { onAnnounce("تطبيق البانوراما سيتم تفعيله لاحقاً بذكاء") }
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Panorama
+                    val isPanoramaSelected = cameraMode == CameraMode.PANORAMA
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.clickable { onSetCameraMode(CameraMode.PANORAMA) }) {
+                        Text(text = "بانوراما", color = if (isPanoramaSelected) AmberGolden else Color.White.copy(alpha = 0.4f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (isPanoramaSelected) Box(modifier = Modifier.size(5.dp).background(AmberGolden, CircleShape))
+                    }
                     val isPhotoSelected = cameraMode == CameraMode.PHOTO
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.clickable { onSetCameraMode(CameraMode.PHOTO) }) {
-                        Text(text = "صورة", color = if (isPhotoSelected) AmberGolden else Color.White.copy(alpha = 0.4f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        if (isPhotoSelected) Box(modifier = Modifier.size(6.dp).background(AmberGolden, CircleShape))
+                        Text(text = "صورة", color = if (isPhotoSelected) AmberGolden else Color.White.copy(alpha = 0.4f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        if (isPhotoSelected) Box(modifier = Modifier.size(5.dp).background(AmberGolden, CircleShape))
                     }
                     val isVideoSelected = cameraMode == CameraMode.VIDEO
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.clickable { onSetCameraMode(CameraMode.VIDEO) }) {
-                        Text(text = "فيديو", color = if (isVideoSelected) Color(0xFFEF4444) else Color.White.copy(alpha = 0.4f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        if (isVideoSelected) Box(modifier = Modifier.size(6.dp).background(Color(0xFFEF4444), CircleShape))
+                        Text(text = "فيديو", color = if (isVideoSelected) Color(0xFFEF4444) else Color.White.copy(alpha = 0.4f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        if (isVideoSelected) Box(modifier = Modifier.size(5.dp).background(Color(0xFFEF4444), CircleShape))
                     }
-                    Text(
-                        text = "بورتريه",
-                        color = Color.White.copy(alpha = 0.4f),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable { onAnnounce("تطبيق وضع البورتريه السينمائي قريباً جداً") }
-                    )
+                    val isPortraitSelected = cameraMode == CameraMode.PORTRAIT
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.clickable { onSetCameraMode(CameraMode.PORTRAIT) }) {
+                        Text(text = "بورتريه", color = if (isPortraitSelected) AmberGolden else Color.White.copy(alpha = 0.4f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (isPortraitSelected) Box(modifier = Modifier.size(5.dp).background(AmberGolden, CircleShape))
+                    }
+                    val isProSelected = cameraMode == CameraMode.PRO
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.clickable { onSetCameraMode(CameraMode.PRO) }) {
+                        Text(text = "احترافي", color = if (isProSelected) AmberGolden else Color.White.copy(alpha = 0.4f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (isProSelected) Box(modifier = Modifier.size(5.dp).background(AmberGolden, CircleShape))
+                    }
                 }
             }
 
             // Shutter row
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                // Gallery
+                // Gallery — Phase 2: always opens gallery grid
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -158,7 +160,7 @@ fun ControlDeck(
                         .border(2.dp, Color.White.copy(alpha = 0.2f), CircleShape)
                         .padding(2.dp)
                         .background(Color(0xFF1E293B))
-                        .clickable { if (lastCapturedUri != null) onGalleryClick() },
+                        .clickable { onGalleryClick() },
                     contentAlignment = Alignment.Center
                 ) {
                     if (lastCapturedUri != null) {

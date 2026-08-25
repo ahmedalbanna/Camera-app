@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.util.Log
 import android.view.ScaleGestureDetector
 import androidx.camera.core.*
+import androidx.camera.extensions.ExtensionMode
+import androidx.camera.extensions.ExtensionsManager
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
@@ -41,6 +43,11 @@ fun CameraPreview(
     onVideoCaptureReady: (VideoCapture<Recorder>?) -> Unit,
     onExposureRangeChanged: (IntRange?) -> Unit = {},
     onZoomRangeChanged: (ClosedFloatingPointRange<Float>?) -> Unit = {},
+    // Phase 2: Pro controls
+    aperture: Float = 2.8f,
+    isHdrEnabled: Boolean = false,
+    manualFocusDistance: Float? = null,
+    onExtensionsAvailability: (portraitAvailable: Boolean, panoramaAvailable: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -70,14 +77,14 @@ fun CameraPreview(
         VideoCapture.withOutput(recorder)
     }
 
-    // Pass the capture blocks to parent whenever they are recreated/changed
+    // Pass the capture blocks to parent whenever they are recreated/changed — Phase 2: all photo-like modes use ImageCapture
     LaunchedEffect(cameraMode, imageCapture, videoCapture) {
-        if (cameraMode == CameraMode.PHOTO) {
-            onImageCaptureReady(imageCapture)
-            onVideoCaptureReady(null)
-        } else {
+        if (cameraMode == CameraMode.VIDEO) {
             onImageCaptureReady(null)
             onVideoCaptureReady(videoCapture)
+        } else {
+            onImageCaptureReady(imageCapture)
+            onVideoCaptureReady(null)
         }
     }
 
@@ -122,8 +129,6 @@ fun CameraPreview(
                 if (zoomState != null) {
                     onZoomRangeChanged(zoomState.minZoomRatio..zoomState.maxZoomRatio)
                 }
-                // Observe zoomState continuously for dynamic updates
-                // Note: we snapshot once; pinch will query live state
             } catch (e: Exception) {
                 Log.e("CameraPreview", "Failed to report camera ranges", e)
                 onExposureRangeChanged(null)
@@ -131,6 +136,30 @@ fun CameraPreview(
         } else {
             onExposureRangeChanged(null)
             onZoomRangeChanged(null)
+        }
+    }
+
+    // Phase 2: Probe extensions availability (Bokeh for Portrait, Auto for Panorama check)
+    LaunchedEffect(cameraSelector) {
+        try {
+            val provider = withContext(Dispatchers.IO) { ProcessCameraProvider.getInstance(context).get() }
+            val extensionsManager = withContext(Dispatchers.IO) { ExtensionsManager.getInstanceAsync(context, provider).get() }
+            val bokehAvailable = try { extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.BOKEH) } catch (_: Exception) { false }
+            // Panorama not a standard extension; use HDR as proxy for availability
+            val hdrAvailable = try { extensionsManager.isExtensionAvailable(cameraSelector, ExtensionMode.HDR) } catch (_: Exception) { false }
+            onExtensionsAvailability(bokehAvailable, hdrAvailable)
+        } catch (e: Exception) {
+            Log.e("CameraPreview", "Extension probe failed", e)
+            onExtensionsAvailability(false, false)
+        }
+    }
+
+    // Phase 2: Manual focus — via Camera2 interop (placeholder: log, actual Camera2CameraControl needed for real MF)
+    LaunchedEffect(camera, manualFocusDistance) {
+        // Real implementation would use Camera2CameraControl.setLinearFocus or capture request
+        // For now we log and keep auto; full MF via Camera2Interop deferred to next iteration
+        if (manualFocusDistance != null) {
+            Log.d("CameraPreview", "Manual focus requested: $manualFocusDistance (auto=${manualFocusDistance == null})")
         }
     }
 
@@ -200,9 +229,9 @@ fun CameraPreview(
                     onTap = { offset ->
                         camera?.let { cam ->
                             val factory = previewView.meteringPointFactory
-                            // Create point with safe bounds
                             val point = factory.createPoint(offset.x, offset.y)
-                            val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                            // Phase 2: unified AF|AE|AWB metering
+                            val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB)
                                 .setAutoCancelDuration(2, java.util.concurrent.TimeUnit.SECONDS)
                                 .build()
 

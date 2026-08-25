@@ -16,7 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class CameraMode {
-    PHOTO, VIDEO
+    PHOTO, VIDEO, PORTRAIT, PANORAMA, PRO
 }
 
 enum class CustomFlashMode {
@@ -62,6 +62,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage = _errorMessage.asStateFlow()
+
+    // Phase 2: Pro + Portrait + Panorama states
+    private val _aperture = MutableStateFlow(2.8f) // f/1.4 .. f/16
+    val aperture = _aperture.asStateFlow()
+
+    private val _isHdrEnabled = MutableStateFlow(false)
+    val isHdrEnabled = _isHdrEnabled.asStateFlow()
+
+    private val _isPortraitExtensionAvailable = MutableStateFlow<Boolean?>(null)
+    val isPortraitExtensionAvailable = _isPortraitExtensionAvailable.asStateFlow()
+
+    private val _isPanoramaExtensionAvailable = MutableStateFlow<Boolean?>(null)
+    val isPanoramaExtensionAvailable = _isPanoramaExtensionAvailable.asStateFlow()
+
+    private val _showProControls = MutableStateFlow(false)
+    val showProControls = _showProControls.asStateFlow()
+
+    private val _manualFocusDistance = MutableStateFlow<Float?>(null) // null = auto, 0f..1f
+    val manualFocusDistance = _manualFocusDistance.asStateFlow()
+
+    private val _panoramaProgress = MutableStateFlow(0f) // 0..1 sweep
+    val panoramaProgress = _panoramaProgress.asStateFlow()
+
+    private val _isGalleryOpen = MutableStateFlow(false)
+    val isGalleryOpen = _isGalleryOpen.asStateFlow()
 
     init {
         // Automatically fetch the last snapped photo or video on initialize
@@ -187,6 +212,51 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setExposureIndex(index: Int) {
         _exposureIndex.value = index
+    }
+
+    // Phase 2: Pro controls
+    fun setAperture(value: Float) {
+        _aperture.value = value.coerceIn(1.4f, 16f)
+    }
+
+    fun toggleHdr() {
+        _isHdrEnabled.value = !_isHdrEnabled.value
+    }
+
+    fun setHdrEnabled(enabled: Boolean) {
+        _isHdrEnabled.value = enabled
+    }
+
+    fun setExtensionAvailability(portrait: Boolean?, panorama: Boolean?) {
+        _isPortraitExtensionAvailable.value = portrait
+        _isPanoramaExtensionAvailable.value = panorama
+    }
+
+    fun toggleProControls() {
+        _showProControls.value = !_showProControls.value
+    }
+
+    fun setShowProControls(show: Boolean) {
+        _showProControls.value = show
+    }
+
+    fun setManualFocus(distance: Float?) {
+        _manualFocusDistance.value = distance?.coerceIn(0f, 1f)
+    }
+
+    fun setPanoramaProgress(progress: Float) {
+        _panoramaProgress.value = progress.coerceIn(0f, 1f)
+    }
+
+    fun setGalleryOpen(open: Boolean) {
+        _isGalleryOpen.value = open
+    }
+
+    fun isPhotoLikeMode(): Boolean {
+        return _cameraMode.value == CameraMode.PHOTO ||
+                _cameraMode.value == CameraMode.PORTRAIT ||
+                _cameraMode.value == CameraMode.PANORAMA ||
+                _cameraMode.value == CameraMode.PRO
     }
 
     fun getCameraXFlashMode(): Int {

@@ -93,6 +93,81 @@ class CameraRepository(private val context: Context) {
         return mime?.startsWith("video", ignoreCase = true) == true
     }
 
+    // Phase 2: Paged gallery via MediaStore.Files (images + videos)
+    data class GalleryItem(val uri: Uri, val isVideo: Boolean, val dateAdded: Long)
+
+    suspend fun getGalleryPage(page: Int, pageSize: Int = 30): List<GalleryItem> = withContext(Dispatchers.IO) {
+        val collection = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.MEDIA_TYPE,
+            MediaStore.Files.FileColumns.DATE_ADDED
+        )
+        val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE}=? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE}=?"
+        val selectionArgs = arrayOf(
+            MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+            MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()
+        )
+        val sortOrder = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
+        val result = mutableListOf<GalleryItem>()
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val bundle = Bundle().apply {
+                    putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                    putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+                    putString(android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+                    putInt(android.content.ContentResolver.QUERY_ARG_LIMIT, pageSize)
+                    putInt(android.content.ContentResolver.QUERY_ARG_OFFSET, page * pageSize)
+                }
+                context.contentResolver.query(collection, projection, bundle, null)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                    val typeCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val type = cursor.getInt(typeCol)
+                        val date = cursor.getLong(dateCol)
+                        val isVideo = type == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                        val uri = ContentUris.withAppendedId(collection, id)
+                        // For Files collection, we need to use Images/Video uri for actual access? Files uri works for query but for display use proper
+                        // Reconstruct proper uri via Images/Video
+                        val properUri = if (isVideo) ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                        else ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                        result.add(GalleryItem(properUri, isVideo, date))
+                    }
+                }
+            } else {
+                // Legacy: query without offset/limit, manually slice
+                context.contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                    val typeCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+                    val offset = page * pageSize
+                    var index = 0
+                    while (cursor.moveToNext() && result.size < pageSize) {
+                        if (index++ < offset) continue
+                        val id = cursor.getLong(idCol)
+                        val type = cursor.getInt(typeCol)
+                        val date = cursor.getLong(dateCol)
+                        val isVideo = type == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                        val properUri = if (isVideo) ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                        else ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                        result.add(GalleryItem(properUri, isVideo, date))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CameraRepository", "Gallery query failed", e)
+        }
+        result
+    }
+
+    companion object {
+        const val RELATIVE_PATH = "DCIM/Al-Adasa" // Phase 2: branded folder, was DCIM/Camera
+        const val ALTERNATE_PATH = "DCIM/Camera"
+    }
+
     private fun querySingleMedia(
         uri: Uri,
         projection: Array<String>,
