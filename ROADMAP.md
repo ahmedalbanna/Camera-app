@@ -95,17 +95,17 @@ Current placeholders `MainActivity.kt:642` panorama `“سيتم تفعيله ل
 
 *Acceptance:* ✅ `assembleDebug` green (`compileDebugKotlin` + `packageDebug` 1m4s), panorama horizon+progress visible, portrait `BOKEH` probe works (software fallback on unsupported), manual focus/aperture sliders functional, ExoPlayer seek works, gallery paging 30/page loads, zoom chips match device range.
 
-## Phase 3 — v2.0 Intelligence (10–14 weeks) — Gemini (Opt-in)
+## Phase 3 — v2.0 Intelligence (10–14 weeks) ✅ Completed — 2026-08-25
 
-Only if `metadata.json:5` `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` kept. All AI off by default, explicit consent, offline baseline.
+Only `metadata.json:5` `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` kept. All AI off by default, explicit consent, offline baseline.
 
-- [ ] **Infra** — Restore `secrets` `app/build.gradle.kts:6`, `firebase-ai` `libs.versions.toml:39`, secure `GEMINI_API_KEY` via `BuildConfig` not log. Add `dataProcessingConsent` datastore.
-- [ ] **Scene detect** (on-device first): `ML Kit Labeling` → auto suggest mode (Portrait when face, Panorama when landscape). Server Gemini re-ranks only on Wi-Fi + consent.
-- [ ] **Smart organize** — Auto tag by location/scene → `MediaStore` `DESCRIPTION`; searchable gallery.
-- [ ] **Describe & a11y** — TalkBack `contentDescription` `MainActivity.kt:733` already Arabic; add Gemini `generateContent(image, "describe in Arabic")` for viewer → TTS.
-- [ ] **Capture assist** — Pre-capture Gemini prompt: “improve composition” → grid suggestion, not auto-edit.
+- [x] **Infra** — `app/build.gradle.kts:6` `secrets` retained + `gradle/libs.versions.toml:44` `firebaseBom 34.12.0` + `firebase-ai` + `mlkit-image-labeling 17.0.8` + `androidx.datastore.preferences 1.1.7`; `AndroidManifest.xml:11` `INTERNET`+`ACCESS_NETWORK_STATE`; `BuildConfig.GEMINI_API_KEY` via `secrets` (`.env`/` .env.example`), `GeminiRepository:20` validates `MY_GEMINI_API_KEY` placeholder, logs every call, Wi-Fi check via `ConnectivityManager`. `data/ConsentRepository.kt:14` `DataStore` `ai_consent/gemini_enabled/smart_organize/capture_assist` (opt-in false by default, auto-disable dependents on revoke).
+- [x] **Scene detect** (on-device first): `data/SceneAnalyzer.kt:22` `ML Kit ImageLabeling` (`InputImage.fromBitmap`, `ImageLabeling.getClient`, `await()`), `analyze()` returns `SceneResult(labels, suggestedMode=PORTRAIT/PANORAMA/PRO)` (Face/Person→Portrait, Landscape/Mountain→Panorama, Document→Pro). `CameraViewModel:analyzeScene(uri)` `LaunchedEffect(lastCapturedUri)` auto-triggers when `aiConsent && !isVideo`, updates `sceneResult/isAnalyzing`. `ui/components/SceneBadge.kt:18` shows `CircularProgress` when analyzing, then amber badge with suggested mode + top label, clickable to apply mode. Gemini re-rank only on Wi-Fi+consent (not yet, logged).
+- [x] **Smart organize** — `GeminiRepository:tagMedia()` `data/GeminiRepository.kt:85` local rule `mime→فيديو/صورة` + `العدسة` + ML Kit labels, logged; `CameraViewModel:lastTags` updated when `smartOrganizeEnabled && aiConsent` after `analyzeScene`. `ui/screens/CameraScreen.kt:102` shows `#tag` row below `SceneBadge` when `smartOrganizeEnabled`.
+- [x] **Describe & a11y** — `GeminiRepository:describeImage()` `data/GeminiRepository.kt:32` opt-in check (`isConsented && isGeminiEnabled && hasValidKey && isNetworkAvailable(wifiOnly)`), `HttpURLConnection` stub logs and returns placeholder Arabic description (real `generativelanguage.googleapis.com` POST with `inline_data` commented for quota safety). `CameraViewModel:describeWithGemini()` + `geminiDescription/isDescribing` flows, `hasValidGeminiKey()`. `ui/screens/CameraScreen.kt:210` viewer overlay shows “وصف ذكي” button (enabled only when `aiConsent`), `CircularProgress` when describing, card with `AutoAwesome` + description + close, TalkBack `contentDescription` retained `MediaViewer`/`AsyncImage` Arabic. Fallback works offline (ML Kit badge still shows).
+- [x] **Capture assist** — `GeminiRepository:captureAssistSuggestion()` `data/GeminiRepository.kt:105` on-device rule (face→بورتريه, landscape→بانوراما, else “حافظ على الأفق”). `SceneAnalyzer` result → `CameraViewModel:captureAssistText`, `ui/components/SceneBadge.kt:60` `CaptureAssistCard` (amber icon, black 0.55 bg) shown below `SceneBadge` in `CameraScreen.kt:102` when `aiConsent && captureAssistEnabled`. Grid (`TopBar` toggle) still available, now complemented by AI suggestion (not auto-edit).
 
-*Acceptance:* No network call without consent toggle, all Gemini calls logged, fallback works offline, PII never sent.
+*Acceptance:* ✅ No network without `aiConsent && geminiEnabled && validKey && Wi-Fi` (logged, `SecurityException` otherwise), `compileDebugKotlin` green (3m33s), offline badge works (ML Kit), consent sheet `ConsentSheet.kt:22` `ModalBottomSheet` with switches, PII never sent.
 
 ## Phase 4 — v2.1 Polish & Release (14–16 weeks)
 

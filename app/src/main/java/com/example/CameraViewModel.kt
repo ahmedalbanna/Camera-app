@@ -2,16 +2,21 @@ package com.example
 
 import android.app.Application
 import android.net.Uri
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.video.Recording
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.CameraRepository
+import com.example.data.ConsentRepository
+import com.example.data.GeminiRepository
+import com.example.data.SceneAnalyzer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -26,6 +31,9 @@ enum class CustomFlashMode {
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = CameraRepository(application.applicationContext)
+    private val consentRepository = ConsentRepository(application.applicationContext)
+    private val sceneAnalyzer = SceneAnalyzer(application.applicationContext)
+    private val geminiRepository = GeminiRepository(application.applicationContext)
 
     private val _cameraSelector = MutableStateFlow(CameraSelector.DEFAULT_BACK_CAMERA)
     val cameraSelector = _cameraSelector.asStateFlow()
@@ -88,9 +96,50 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _isGalleryOpen = MutableStateFlow(false)
     val isGalleryOpen = _isGalleryOpen.asStateFlow()
 
+    // Phase 3: Intelligence
+    private val _aiConsent = MutableStateFlow(false)
+    val aiConsent = _aiConsent.asStateFlow()
+    private val _geminiEnabled = MutableStateFlow(false)
+    val geminiEnabled = _geminiEnabled.asStateFlow()
+    private val _smartOrganizeEnabled = MutableStateFlow(false)
+    val smartOrganizeEnabled = _smartOrganizeEnabled.asStateFlow()
+    private val _captureAssistEnabled = MutableStateFlow(true)
+    val captureAssistEnabled = _captureAssistEnabled.asStateFlow()
+
+    private val _sceneResult = MutableStateFlow<SceneAnalyzer.SceneResult?>(null)
+    val sceneResult = _sceneResult.asStateFlow()
+    private val _isAnalyzing = MutableStateFlow(false)
+    val isAnalyzing = _isAnalyzing.asStateFlow()
+    private val _captureAssistText = MutableStateFlow<String?>(null)
+    val captureAssistText = _captureAssistText.asStateFlow()
+
+    private val _geminiDescription = MutableStateFlow<String?>(null)
+    val geminiDescription = _geminiDescription.asStateFlow()
+    private val _isDescribing = MutableStateFlow(false)
+    val isDescribing = _isDescribing.asStateFlow()
+
+    private val _lastTags = MutableStateFlow<List<String>>(emptyList())
+    val lastTags = _lastTags.asStateFlow()
+
     init {
         // Automatically fetch the last snapped photo or video on initialize
         loadLastCapturedMedia()
+        observeConsent()
+    }
+
+    private fun observeConsent() {
+        viewModelScope.launch {
+            consentRepository.aiConsentFlow.collectLatest { _aiConsent.value = it }
+        }
+        viewModelScope.launch {
+            consentRepository.geminiEnabledFlow.collectLatest { _geminiEnabled.value = it }
+        }
+        viewModelScope.launch {
+            consentRepository.smartOrganizeFlow.collectLatest { _smartOrganizeEnabled.value = it }
+        }
+        viewModelScope.launch {
+            consentRepository.captureAssistFlow.collectLatest { _captureAssistText.value = null; _captureAssistEnabled.value = it }
+        }
     }
 
     override fun onCleared() {
@@ -101,6 +150,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } catch (_: Exception) {}
         activeRecording = null
         timerJob?.cancel()
+        try { sceneAnalyzer.close() } catch (_: Exception) {}
     }
 
     fun toggleCamera() {
@@ -258,6 +308,84 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 _cameraMode.value == CameraMode.PANORAMA ||
                 _cameraMode.value == CameraMode.PRO
     }
+
+    // Phase 3: Consent
+    fun setAiConsent(consented: Boolean) {
+        viewModelScope.launch { consentRepository.setAiConsent(consented) }
+    }
+    fun setGeminiEnabled(enabled: Boolean) {
+        viewModelScope.launch { consentRepository.setGeminiEnabled(enabled) }
+    }
+    fun setSmartOrganize(enabled: Boolean) {
+        viewModelScope.launch { consentRepository.setSmartOrganize(enabled) }
+    }
+    fun setCaptureAssistEnabled(enabled: Boolean) {
+        viewModelScope.launch { consentRepository.setCaptureAssist(enabled) }
+    }
+
+    // Phase 3: Scene analyze (on-device ML Kit, no network)
+    fun analyzeScene(uri: Uri) {
+        if (_isAnalyzing.value) return
+        viewModelScope.launch {
+            _isAnalyzing.value = true
+            try {
+                val result = sceneAnalyzer.analyze(uri)
+                _sceneResult.value = result
+                // Capture assist suggestion (offline rule, Gemini would re-rank)
+                val suggestion = result?.let { geminiRepository.captureAssistSuggestion(it.rawTopLabel, _aiConsent.value) }
+                _captureAssistText.value = suggestion
+                // Smart organize tags if enabled
+                if (_smartOrganizeEnabled.value && _aiConsent.value) {
+                    val tagRes = geminiRepository.tagMedia(uri, _aiConsent.value)
+                    if (tagRes.isSuccess) _lastTags.value = tagRes.getOrDefault(emptyList())
+                }
+                Log.d("CameraVM", "Scene analyzed: ${result?.labels} -> ${result?.suggestedMode}")
+            } catch (e: Exception) {
+                Log.e("CameraVM", "Scene analyze failed", e)
+            } finally {
+                _isAnalyzing.value = false
+            }
+        }
+    }
+
+    fun clearScene() {
+        _sceneResult.value = null
+        _captureAssistText.value = null
+    }
+
+    // Phase 3: Gemini describe (opt-in, wifi, key required)
+    fun describeWithGemini(uri: Uri) {
+        if (_isDescribing.value) return
+        viewModelScope.launch {
+            _isDescribing.value = true
+            _geminiDescription.value = null
+            try {
+                val result = geminiRepository.describeImage(
+                    uri = uri,
+                    isConsented = _aiConsent.value,
+                    isGeminiEnabled = _geminiEnabled.value
+                )
+                if (result.isSuccess) {
+                    _geminiDescription.value = result.getOrNull()
+                } else {
+                    val err = result.exceptionOrNull()?.message ?: "غير متاح"
+                    _geminiDescription.value = null
+                    setErrorMessage("Gemini: $err")
+                }
+            } catch (e: Exception) {
+                Log.e("CameraVM", "Gemini describe failed", e)
+                setErrorMessage("فشل الوصف: ${e.message}")
+            } finally {
+                _isDescribing.value = false
+            }
+        }
+    }
+
+    fun clearGeminiDescription() {
+        _geminiDescription.value = null
+    }
+
+    fun hasValidGeminiKey(): Boolean = geminiRepository.hasValidKey()
 
     fun getCameraXFlashMode(): Int {
         return when (_flashMode.value) {
