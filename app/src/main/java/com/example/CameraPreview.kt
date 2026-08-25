@@ -1,10 +1,7 @@
 package com.example
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.util.Log
-import android.view.GestureDetector
-import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -24,12 +21,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import java.util.concurrent.Executor
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @SuppressLint("ClickableViewAccessibility")
 @Composable
@@ -41,6 +39,8 @@ fun CameraPreview(
     onZoomRatioChanged: (Float) -> Unit,
     onImageCaptureReady: (ImageCapture?) -> Unit,
     onVideoCaptureReady: (VideoCapture<Recorder>?) -> Unit,
+    onExposureRangeChanged: (IntRange?) -> Unit = {},
+    onZoomRangeChanged: (ClosedFloatingPointRange<Float>?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -81,10 +81,19 @@ fun CameraPreview(
         }
     }
 
-    // Automatically apply zoom ratio on the active camera controller
+    // Automatically apply zoom ratio on the active camera controller — clamp to device range
     LaunchedEffect(camera, zoomRatio) {
         try {
-            camera?.cameraControl?.setZoomRatio(zoomRatio)
+            val zoomState = camera?.cameraInfo?.zoomState?.value
+            val min = zoomState?.minZoomRatio ?: 1f
+            val max = zoomState?.maxZoomRatio ?: 10f
+            val clamped = zoomRatio.coerceIn(min, max)
+            if (clamped != zoomRatio) {
+                // Report clamped value back to ViewModel to keep UI in sync
+                onZoomRatioChanged(clamped)
+            } else {
+                camera?.cameraControl?.setZoomRatio(clamped)
+            }
         } catch (e: Exception) {
             Log.e("CameraPreview", "Failed to set zoom ratio $zoomRatio", e)
         }
@@ -102,13 +111,39 @@ fun CameraPreview(
         }
     }
 
-    // Set up pinch gesture detector for zooming on native view
+    // Report exposure and zoom capabilities once camera is bound
+    LaunchedEffect(camera) {
+        val cam = camera
+        if (cam != null) {
+            try {
+                val exposureRange = cam.cameraInfo.exposureState.exposureCompensationRange
+                onExposureRangeChanged(exposureRange?.let { it.lower..it.upper })
+                val zoomState = cam.cameraInfo.zoomState.value
+                if (zoomState != null) {
+                    onZoomRangeChanged(zoomState.minZoomRatio..zoomState.maxZoomRatio)
+                }
+                // Observe zoomState continuously for dynamic updates
+                // Note: we snapshot once; pinch will query live state
+            } catch (e: Exception) {
+                Log.e("CameraPreview", "Failed to report camera ranges", e)
+                onExposureRangeChanged(null)
+            }
+        } else {
+            onExposureRangeChanged(null)
+            onZoomRangeChanged(null)
+        }
+    }
+
+    // Set up pinch gesture detector for zooming on native view — dynamic min/max
     val scaleGestureDetector = remember {
         ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val currentZoomRatio = camera?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
+                val zoomState = camera?.cameraInfo?.zoomState?.value
+                val min = zoomState?.minZoomRatio ?: 1f
+                val max = zoomState?.maxZoomRatio ?: 10f
+                val currentZoomRatio = zoomState?.zoomRatio ?: 1f
                 val delta = detector.scaleFactor
-                val targetZoom = (currentZoomRatio * delta).coerceIn(1.0f, 10.0f)
+                val targetZoom = (currentZoomRatio * delta).coerceIn(min, max)
                 onZoomRatioChanged(targetZoom)
                 return true
             }
@@ -116,35 +151,44 @@ fun CameraPreview(
     }
 
     // Bind Use Cases dynamically based on the current Mode (Photo vs Video)
-    // This gives incredible stability and prevents hardware allocation errors
+    // HOTFIX: use Dispatchers.IO for get() to avoid blocking Main, and ensure unbind on dispose
     LaunchedEffect(cameraSelector, cameraMode) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            cameraProvider.unbindAll()
+        val cameraProvider = withContext(Dispatchers.IO) {
+            ProcessCameraProvider.getInstance(context).get()
+        }
+        cameraProvider.unbindAll()
 
-            try {
-                preview.setSurfaceProvider(previewView.surfaceProvider)
+        try {
+            preview.setSurfaceProvider(previewView.surfaceProvider)
 
-                camera = if (cameraMode == CameraMode.PHOTO) {
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        cameraSelector,
-                        preview,
-                        imageCapture
-                    )
-                } else {
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        cameraSelector,
-                        preview,
-                        videoCapture
-                    )
-                }
-            } catch (exc: Exception) {
-                Log.e("CameraPreview", "Use case binding failed", exc)
+            camera = if (cameraMode == CameraMode.PHOTO) {
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageCapture
+                )
+            } else {
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    videoCapture
+                )
             }
-        }, ContextCompat.getMainExecutor(context))
+        } catch (exc: Exception) {
+            Log.e("CameraPreview", "Use case binding failed", exc)
+        }
+    }
+
+    // Cleanup when composable leaves composition
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            try {
+                val provider = ProcessCameraProvider.getInstance(context).get()
+                provider.unbindAll()
+            } catch (_: Exception) {}
+        }
     }
 
     // Setup tap gesture on ViewFinder for Focus & Metering

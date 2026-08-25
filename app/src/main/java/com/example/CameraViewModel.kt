@@ -4,18 +4,23 @@ import android.app.Application
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
+import androidx.camera.video.Recording
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class CameraMode {
     PHOTO, VIDEO
@@ -58,10 +63,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val showShotAnimation = _showShotAnimation.asStateFlow()
 
     private var timerJob: Job? = null
+    private var activeRecording: Recording? = null
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage = _errorMessage.asStateFlow()
 
     init {
         // Automatically fetch the last snapped photo or video on initialize
         loadLastCapturedMedia()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            activeRecording?.stop()
+            activeRecording?.close()
+        } catch (_: Exception) {}
+        activeRecording = null
+        timerJob?.cancel()
     }
 
     fun toggleCamera() {
@@ -90,7 +109,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _isFlashMenuVisible.value = false
     }
 
-    fun startRecordingState() {
+    // Called ONLY when VideoRecordEvent.Start is received
+    fun onRecordingStarted(recording: Recording) {
+        activeRecording = recording
         _isRecording.value = true
         _recordingDuration.value = 0
         timerJob?.cancel()
@@ -106,6 +127,33 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _isRecording.value = false
         timerJob?.cancel()
         timerJob = null
+        try {
+            activeRecording?.stop()
+        } catch (_: Exception) {}
+        // keep reference until Finalize closes it, but clear timer
+    }
+
+    fun onRecordingFinalized() {
+        _isRecording.value = false
+        timerJob?.cancel()
+        timerJob = null
+        try {
+            activeRecording?.close()
+        } catch (_: Exception) {}
+        activeRecording = null
+    }
+
+    fun setActiveRecording(recording: Recording?) {
+        activeRecording = recording
+    }
+
+    fun getActiveRecording(): Recording? = activeRecording
+
+    fun clearActiveRecording() {
+        try {
+            activeRecording?.close()
+        } catch (_: Exception) {}
+        activeRecording = null
     }
 
     fun triggerShutterAnimation() {
@@ -120,6 +168,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _lastCapturedUri.value = uri
     }
 
+    fun setErrorMessage(msg: String?) {
+        _errorMessage.value = msg
+    }
+
+    fun consumeErrorMessage() {
+        _errorMessage.value = null
+    }
+
     fun loadLastCapturedMedia() {
         viewModelScope.launch {
             val lastMedia = queryLastCapturedMedia(getApplication())
@@ -127,7 +183,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun queryLastCapturedMedia(context: Context): Uri? {
+    private suspend fun queryLastCapturedMedia(context: Context): Uri? = withContext(Dispatchers.IO) {
         val imagesUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val videosUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
 
@@ -146,22 +202,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         var lastVideoUri: Uri? = null
         var lastVideoDate: Long = 0
 
-        // Query last image
+        // Query last image — API 30+ uses Bundle with LIMIT, pre-30 falls back to DESC sort
         try {
-            context.contentResolver.query(
-                imagesUri,
-                imageProjection,
-                null,
-                null,
-                "${MediaStore.Images.Media.DATE_ADDED} DESC LIMIT 1"
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                    val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
-                    val id = cursor.getLong(idColumn)
-                    lastImageDate = cursor.getLong(dateColumn)
-                    lastImageUri = ContentUris.withAppendedId(imagesUri, id)
-                }
+            querySingleMedia(
+                context = context,
+                uri = imagesUri,
+                projection = imageProjection,
+                idColumnName = MediaStore.Images.Media._ID,
+                dateColumnName = MediaStore.Images.Media.DATE_ADDED
+            )?.let { (uri, date) ->
+                lastImageUri = uri
+                lastImageDate = date
             }
         } catch (e: Exception) {
             Log.e("CameraVM", "Error querying last image", e)
@@ -169,30 +220,75 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         // Query last video
         try {
-            context.contentResolver.query(
-                videosUri,
-                videoProjection,
-                null,
-                null,
-                "${MediaStore.Video.Media.DATE_ADDED} DESC LIMIT 1"
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                    val dateColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
-                    val id = cursor.getLong(idColumn)
-                    lastVideoDate = cursor.getLong(dateColumn)
-                    lastVideoUri = ContentUris.withAppendedId(videosUri, id)
-                }
+            querySingleMedia(
+                context = context,
+                uri = videosUri,
+                projection = videoProjection,
+                idColumnName = MediaStore.Video.Media._ID,
+                dateColumnName = MediaStore.Video.Media.DATE_ADDED
+            )?.let { (uri, date) ->
+                lastVideoUri = uri
+                lastVideoDate = date
             }
         } catch (e: Exception) {
             Log.e("CameraVM", "Error querying last video", e)
         }
 
-        return if (lastImageUri != null && lastVideoUri != null) {
+        if (lastImageUri != null && lastVideoUri != null) {
             if (lastImageDate >= lastVideoDate) lastImageUri else lastVideoUri
         } else {
             lastImageUri ?: lastVideoUri
         }
+    }
+
+    private fun querySingleMedia(
+        context: Context,
+        uri: Uri,
+        projection: Array<String>,
+        idColumnName: String,
+        dateColumnName: String
+    ): Pair<Uri, Long>? {
+        val sortColumn = dateColumnName // DATE_ADDED
+        // Try modern Bundle query on API 30+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val bundle = Bundle().apply {
+                        putString(
+                            android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER,
+                            "$sortColumn DESC"
+                        )
+                        putInt(android.content.ContentResolver.QUERY_ARG_LIMIT, 1)
+                    }
+                    context.contentResolver.query(uri, projection, bundle, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val id = cursor.getLong(cursor.getColumnIndexOrThrow(idColumnName))
+                            val date = cursor.getLong(cursor.getColumnIndexOrThrow(dateColumnName))
+                            return Pair(ContentUris.withAppendedId(uri, id), date)
+                        }
+                    }
+                    // If bundle query returns null/empty, fall through
+                }
+            } catch (e: Exception) {
+                Log.w("CameraVM", "Bundle query failed, falling back to legacy", e)
+            }
+        }
+        // Legacy fallback — no LIMIT in sortOrder; we just take first row after DESC sort
+        // This avoids undocumented "DESC LIMIT 1" which fails on some OEMs
+        context.contentResolver.query(
+            uri,
+            projection,
+            null,
+            null,
+            "$sortColumn DESC"
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(cursor.getColumnIndexOrThrow(idColumnName))
+                val date = cursor.getLong(cursor.getColumnIndexOrThrow(dateColumnName))
+                return Pair(ContentUris.withAppendedId(uri, id), date)
+            }
+        }
+        return null
     }
 
     fun setZoomRatio(ratio: Float) {

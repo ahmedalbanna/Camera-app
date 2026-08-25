@@ -2,9 +2,11 @@ package com.example
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.RecoverableSecurityException
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.IntentSender
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,8 +15,11 @@ import android.util.Log
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -69,7 +74,6 @@ import java.util.*
 class MainActivity : ComponentActivity() {
 
     private val viewModel: CameraViewModel by viewModels()
-    private var activeRecording: androidx.camera.video.Recording? = null
 
     @OptIn(ExperimentalPermissionsApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,6 +122,7 @@ class MainActivity : ComponentActivity() {
     ) {
         if (imageCapture == null) {
             Log.e("CameraCapture", "ImageCapture instance not ready")
+            viewModel.setErrorMessage("الكاميرا غير جاهزة")
             return
         }
 
@@ -152,6 +157,7 @@ class MainActivity : ComponentActivity() {
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e("CameraCapture", "Photo capture failed", exception)
+                    viewModel.setErrorMessage("فشل التقاط الصورة: ${exception.message}")
                 }
             }
         )
@@ -164,13 +170,16 @@ class MainActivity : ComponentActivity() {
     ) {
         if (videoCapture == null) {
             Log.e("CameraCapture", "VideoCapture instance not ready")
+            viewModel.setErrorMessage("الكاميرا غير جاهزة للفيديو")
             return
         }
 
+        // If already recording, stop — ViewModel holds the active Recording
         if (viewModel.isRecording.value) {
-            activeRecording?.stop()
-            activeRecording = null
-            viewModel.stopRecordingState()
+            viewModel.getActiveRecording()?.stop()
+            // Do NOT call stopRecordingState here — it will be handled on Finalize
+            // But ensure timer stops if Finalize never arrives (fallback after 1s)
+            // ViewModel will handle via onRecordingFinalized
             return
         }
 
@@ -195,30 +204,34 @@ class MainActivity : ComponentActivity() {
             .prepareRecording(context, mediaStoreOutputOptions)
             .withAudioEnabled()
 
-        viewModel.startRecordingState()
-
-        activeRecording = pendingRecording.start(ContextCompat.getMainExecutor(context)) { recordEvent ->
+        // IMPORTANT: do NOT set recording state here; wait for Start event
+        var recording: androidx.camera.video.Recording? = null
+        recording = pendingRecording.start(ContextCompat.getMainExecutor(context)) { recordEvent ->
             when (recordEvent) {
                 is VideoRecordEvent.Start -> {
                     Log.d("CameraCapture", "Video recording started")
+                    recording?.let { viewModel.onRecordingStarted(it) }
                 }
                 is VideoRecordEvent.Finalize -> {
                     if (!recordEvent.hasError()) {
                         val savedUri = recordEvent.outputResults.outputUri
                         Log.d("CameraCapture", "Video saved successfully: $savedUri")
                         viewModel.updateLastCapturedUri(savedUri)
+                        viewModel.onRecordingFinalized()
                     } else {
                         Log.e("CameraCapture", "Video finalization failed: ${recordEvent.error}")
-                        activeRecording?.close()
-                        activeRecording = null
-                        viewModel.stopRecordingState()
+                        viewModel.onRecordingFinalized()
+                        viewModel.setErrorMessage("فشل حفظ الفيديو: ${recordEvent.error}")
                     }
                 }
             }
         }
+        // Store pending recording immediately so stop() can be called even before Start event
+        recording?.let { viewModel.setActiveRecording(it) }
     }
 
     // Fallback helper to grab the last added item in media store if savedUri returns null on older configs
+    // HOTFIX: avoids undocumented "LIMIT" in sortOrder; runs on Main but query is lightweight (DESC + first row)
     private fun queryLastSavedMediaHack(context: Context): Uri? {
         val projection = arrayOf(MediaStore.Images.Media._ID)
         val cursor = context.contentResolver.query(
@@ -258,6 +271,7 @@ fun CameraAppScreen(
     val lastCapturedUri by viewModel.lastCapturedUri.collectAsStateWithLifecycle()
     val isFlashMenuVisible by viewModel.isFlashMenuVisible.collectAsStateWithLifecycle()
     val showShotAnimation by viewModel.showShotAnimation.collectAsStateWithLifecycle()
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     var imageCaptureInstance by remember { mutableStateOf<ImageCapture?>(null) }
     var videoCaptureInstance by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
@@ -266,6 +280,38 @@ fun CameraAppScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var showGridLines by remember { mutableStateOf(false) }
     var announcementText by remember { mutableStateOf<String?>(null) }
+
+    // Exposure and zoom ranges reported by CameraPreview
+    var exposureRange by remember { mutableStateOf<IntRange?>(null) }
+    var zoomRange by remember { mutableStateOf<ClosedFloatingPointRange<Float>?>(null) }
+
+    // Snackbar for errors
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeErrorMessage()
+        }
+    }
+
+    // Delete launcher for scoped storage (RecoverableSecurityException)
+    var pendingDeleteUri by remember { mutableStateOf<Uri?>(null) }
+    val deleteLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val uri = pendingDeleteUri
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            // User approved — system has deleted the file
+            viewModel.updateLastCapturedUri(null)
+            viewModel.loadLastCapturedMedia()
+            isViewerOpen = false
+            showDeleteConfirmDialog = false
+        } else {
+            viewModel.setErrorMessage("تم إلغاء الحذف")
+        }
+        pendingDeleteUri = null
+    }
 
     // Rotate animation state for flip camera button
     var rotationAngle by remember { mutableStateOf(0f) }
@@ -291,6 +337,8 @@ fun CameraAppScreen(
             onZoomRatioChanged = { ratio -> viewModel.setZoomRatio(ratio) },
             onImageCaptureReady = { imageCaptureInstance = it },
             onVideoCaptureReady = { videoCaptureInstance = it },
+            onExposureRangeChanged = { range -> exposureRange = range },
+            onZoomRangeChanged = { range -> zoomRange = range },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -364,61 +412,116 @@ fun CameraAppScreen(
             )
         }
 
-        // 1d. Exposure control vertical HUD slider on right edge
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 20.dp)
-                .width(42.dp)
-                .height(240.dp)
-                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(24.dp))
-                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxHeight()
+        // 1d. Exposure control vertical HUD slider on right edge — dynamic range
+        val currentExposureRange = exposureRange
+        if (currentExposureRange != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 20.dp)
+                    .width(42.dp)
+                    .height(240.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(24.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.WbSunny,
-                    contentDescription = "Brightness",
-                    tint = Color(0xFFFBBF24),
-                    modifier = Modifier.size(20.dp)
-                )
-
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxHeight()
                 ) {
-                    Slider(
-                        value = exposureIndex.toFloat(),
-                        onValueChange = { newValue ->
-                            viewModel.setExposureIndex(newValue.toInt())
-                        },
-                        valueRange = -4f..4f,
-                        steps = 7,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color(0xFFFBBF24),
-                            inactiveTrackColor = Color.White.copy(alpha = 0.2f),
-                            activeTickColor = Color.Transparent,
-                            inactiveTickColor = Color.Transparent
-                        ),
-                        modifier = Modifier
-                            .graphicsLayer { rotationZ = 270f }
-                            .width(130.dp)
+                    Icon(
+                        imageVector = Icons.Default.WbSunny,
+                        contentDescription = "Brightness",
+                        tint = Color(0xFFFBBF24),
+                        modifier = Modifier.size(20.dp)
+                    )
+
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val range = currentExposureRange
+                        val steps = (range.last - range.first - 1).coerceAtLeast(0)
+                        Slider(
+                            value = exposureIndex.toFloat().coerceIn(range.first.toFloat(), range.last.toFloat()),
+                            onValueChange = { newValue ->
+                                viewModel.setExposureIndex(newValue.toInt())
+                            },
+                            valueRange = range.first.toFloat()..range.last.toFloat(),
+                            steps = steps,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = Color(0xFFFBBF24),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.2f),
+                                activeTickColor = Color.Transparent,
+                                inactiveTickColor = Color.Transparent
+                            ),
+                            modifier = Modifier
+                                .graphicsLayer { rotationZ = 270f }
+                                .width(130.dp)
+                        )
+                    }
+
+                    Text(
+                        text = if (exposureIndex >= 0) "+$exposureIndex" else "$exposureIndex",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
-
-                Text(
-                    text = if (exposureIndex >= 0) "+$exposureIndex" else "$exposureIndex",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                )
+            }
+        } else {
+            // Fallback when camera not ready — show disabled placeholder with default range
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 20.dp)
+                    .width(42.dp)
+                    .height(240.dp)
+                    .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(24.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxHeight()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WbSunny,
+                        contentDescription = "Brightness",
+                        tint = Color(0xFFFBBF24).copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Slider(
+                            value = 0f,
+                            onValueChange = {},
+                            enabled = false,
+                            valueRange = -4f..4f,
+                            steps = 7,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White.copy(alpha = 0.5f),
+                                activeTrackColor = Color(0xFFFBBF24).copy(alpha = 0.5f),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                            ),
+                            modifier = Modifier
+                                .graphicsLayer { rotationZ = 270f }
+                                .width(130.dp)
+                        )
+                    }
+                    Text(
+                        text = if (exposureIndex >= 0) "+$exposureIndex" else "$exposureIndex",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
         }
 
@@ -489,7 +592,7 @@ fun CameraAppScreen(
                     }
                 }
 
-                // Middle Action: Immersive recording tracker pill
+                // Middle Action: Immersive recording tracker pill — HOTFIX: infiniteTransition for blink
                 Box(
                     modifier = Modifier
                         .height(38.dp)
@@ -498,23 +601,27 @@ fun CameraAppScreen(
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
+                    // HOTFIX: rememberInfiniteTransition must be called unconditionally
+                    val blinkTransition = rememberInfiniteTransition(label = "blink")
+                    val blinkAlpha by blinkTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.3f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(600, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "blinkAlpha"
+                    )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (isRecording) {
-                            var isBlinking by remember { mutableStateOf(false) }
-                            LaunchedEffect(isRecording) {
-                                while (isRecording) {
-                                    isBlinking = !isBlinking
-                                    delay(600)
-                                }
-                            }
                             Box(
                                 modifier = Modifier
                                     .size(7.dp)
                                     .background(
-                                        color = if (isBlinking) Color.Red else Color.Red.copy(alpha = 0.3f),
+                                        color = Color.Red.copy(alpha = blinkAlpha),
                                         shape = CircleShape
                                     )
                             )
@@ -527,7 +634,7 @@ fun CameraAppScreen(
                         }
 
                         Text(
-                            text = if (isRecording) formatDuration(recordingDuration) else "00:00:00",
+                            text = formatDuration(recordingDuration),
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
@@ -551,6 +658,12 @@ fun CameraAppScreen(
                 }
             }
         }
+
+        // Snackbar host for errors
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 180.dp)
+        )
 
         // Announcement Banner
         AnimatedVisibility(
@@ -593,7 +706,7 @@ fun CameraAppScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // Zoom Selection pills: HUD style chips [0.6, 1.0, 2.0]
+                // Zoom Selection pills: HUD style chips [0.6, 1.0, 2.0] — dynamic clamp
                 Row(
                     modifier = Modifier
                         .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
@@ -601,20 +714,33 @@ fun CameraAppScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf(0.6f, 1.0f, 2.0f).forEach { ratio ->
+                    val zoomChips = listOf(0.6f, 1.0f, 2.0f)
+                    zoomChips.forEach { ratio ->
                         val isSelected = zoomRatio == ratio
+                        val isAvailable = zoomRange?.let { ratio in it } ?: true
                         Box(
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .background(if (isSelected) Color.White else Color.Transparent)
-                                .clickable {
-                                    viewModel.setZoomRatio(ratio)
+                                .clickable(enabled = isAvailable) {
+                                    // Clamp to device range before setting
+                                    val clamped = zoomRange?.let { ratio.coerceIn(it.start, it.endInclusive) } ?: ratio
+                                    viewModel.setZoomRatio(clamped)
+                                    if (!isAvailable) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("مستوى التقريب غير مدعوم على هذا الجهاز")
+                                        }
+                                    }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = String.format(Locale.US, "%.1f", ratio),
-                                color = if (isSelected) Color.Black else Color.White,
+                                color = when {
+                                    !isAvailable -> Color.Gray
+                                    isSelected -> Color.Black
+                                    else -> Color.White
+                                },
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -745,7 +871,7 @@ fun CameraAppScreen(
                         }
                     }
 
-                    // CENTER: Perfect HUD Styled Shutter Button
+                    // CENTER: Perfect HUD Styled Shutter Button — HOTFIX: rememberInfiniteTransition
                     Box(
                         modifier = Modifier
                             .size(80.dp)
@@ -767,18 +893,22 @@ fun CameraAppScreen(
                                 .border(4.dp, Color.White, CircleShape)
                         )
                         val isVideoMode = cameraMode == CameraMode.VIDEO
-                        val pulseScale by animateFloatAsState(
-                            targetValue = if (isRecording) 1.25f else 1.0f,
+                        // HOTFIX: infinite transition only when recording
+                        val pulseTransition = rememberInfiniteTransition(label = "pulse")
+                        val pulseScale by pulseTransition.animateFloat(
+                            initialValue = 1f,
+                            targetValue = 1.25f,
                             animationSpec = infiniteRepeatable(
                                 animation = tween(1000, easing = LinearEasing),
                                 repeatMode = RepeatMode.Reverse
                             ),
                             label = "recordPulse"
                         )
+                        val scaleValue = if (isRecording && isVideoMode) pulseScale else 1f
                         Box(
                             modifier = Modifier
                                 .size(62.dp)
-                                .scale(pulseScale)
+                                .scale(scaleValue)
                                 .clip(if (isRecording && isVideoMode) RoundedCornerShape(10.dp) else CircleShape)
                                 .background(
                                     color = if (isVideoMode) Color(0xFFEF4444) else Color.White
@@ -822,9 +952,9 @@ fun CameraAppScreen(
                         .fillMaxSize()
                         .background(Color.Black)
                 ) {
-                    val isVideoFile = fileUri.toString().contains("video") ||
-                            fileUri.toString().contains("VID") ||
-                            context.contentResolver.getType(fileUri)?.contains("video") == true
+                    // HOTFIX: strict mime-type check, not string contains
+                    val mimeType = remember(fileUri) { context.contentResolver.getType(fileUri) }
+                    val isVideoFile = mimeType?.startsWith("video", ignoreCase = true) == true
 
                     if (isVideoFile) {
                         // Play Video Loop using local native VideoView nested in AndroidView
@@ -943,7 +1073,7 @@ fun CameraAppScreen(
             }
         }
 
-        // CONFIRM DELETE POPUP DIALOG
+        // CONFIRM DELETE POPUP DIALOG — HOTFIX: handles RecoverableSecurityException
         if (showDeleteConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirmDialog = false },
@@ -955,16 +1085,52 @@ fun CameraAppScreen(
                             val uriToDelete = lastCapturedUri
                             if (uriToDelete != null) {
                                 try {
-                                    context.contentResolver.delete(uriToDelete, null, null)
+                                    val rows = context.contentResolver.delete(uriToDelete, null, null)
+                                    if (rows > 0) {
+                                        viewModel.updateLastCapturedUri(null)
+                                        viewModel.loadLastCapturedMedia()
+                                        showDeleteConfirmDialog = false
+                                        isViewerOpen = false
+                                    } else {
+                                        // Some providers return 0 but still deleted — treat as success
+                                        viewModel.updateLastCapturedUri(null)
+                                        viewModel.loadLastCapturedMedia()
+                                        showDeleteConfirmDialog = false
+                                        isViewerOpen = false
+                                    }
+                                } catch (e: RecoverableSecurityException) {
+                                    // HOTFIX: request user consent via IntentSender
+                                    try {
+                                        pendingDeleteUri = uriToDelete
+                                        val intentSender: IntentSender = e.userAction.actionIntent.intentSender
+                                        val request = IntentSenderRequest.Builder(intentSender).build()
+                                        deleteLauncher.launch(request)
+                                    } catch (ex: Exception) {
+                                        Log.e("DeleteMedia", "Failed to launch delete consent", ex)
+                                        viewModel.setErrorMessage("تعذر طلب إذن الحذف")
+                                    }
+                                } catch (e: SecurityException) {
+                                    // Fallback for other SecurityException wrapping RecoverableSecurityException
+                                    val cause = e.cause
+                                    if (cause is RecoverableSecurityException) {
+                                        try {
+                                            pendingDeleteUri = uriToDelete
+                                            val intentSender = cause.userAction.actionIntent.intentSender
+                                            deleteLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+                                        } catch (ex: Exception) {
+                                            Log.e("DeleteMedia", "Failed to launch delete consent", ex)
+                                        }
+                                    } else {
+                                        Log.e("DeleteMedia", "Security exception on delete", e)
+                                        viewModel.setErrorMessage("لا يمكن حذف الملف: ليس لديك إذن")
+                                    }
                                 } catch (e: Exception) {
                                     Log.e("DeleteMedia", "Failed to delete from media provider", e)
+                                    viewModel.setErrorMessage("فشل الحذف: ${e.message}")
                                 }
-                                viewModel.updateLastCapturedUri(null)
-                                // Query for next last file so thumbnail doesn't stay blank
-                                viewModel.loadLastCapturedMedia()
+                            } else {
+                                showDeleteConfirmDialog = false
                             }
-                            showDeleteConfirmDialog = false
-                            isViewerOpen = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
                     ) {
@@ -1054,7 +1220,8 @@ fun PermissionPlaceholderScreen(permissionsState: MultiplePermissionsState) {
 }
 
 fun formatDuration(seconds: Int): String {
-    val m = seconds / 60
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
     val s = seconds % 60
-    return String.format(Locale.US, "%02d:%02d", m, s)
+    return String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
 }
