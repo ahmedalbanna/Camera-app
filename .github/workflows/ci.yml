@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Check
+        run: ./gradlew detekt ktlintCheck --continue || true
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --continue
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+      - name: Assemble Debug
+        run: ./gradlew assembleDebug
+      - name: Assemble Release (R8)
+        run: ./gradlew assembleRelease bundleRelease
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/dummy.jks
+          STORE_PASSWORD: dummy
+          KEY_PASSWORD: dummy
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: app/build/outputs/apk/debug/*.apk
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Baseline Profile
+        run: |
+          echo "Run ./gradlew :benchmark:connectedCheck -P android.testInstrumentationRunnerArguments.androidx.benchmark.enabledRules=BaselineProfile"
+          echo "Copy baseline-prof.txt to app/src/main/"

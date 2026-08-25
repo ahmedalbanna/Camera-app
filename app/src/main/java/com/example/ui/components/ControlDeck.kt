@@ -36,7 +36,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +72,7 @@ fun ControlDeck(
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -92,8 +98,11 @@ fun ControlDeck(
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
+                            .testTag("zoom_chip_$ratio")
+                            .semantics { contentDescription = "Zoom ${"%.1f".format(ratio)}" }
                             .background(if (isSelected) Color.White else Color.Transparent)
                             .clickable(enabled = isAvailable) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 val clamped = zoomRange?.let { ratio.coerceIn(it.start, it.endInclusive) } ?: ratio
                                 onSetZoomRatio(clamped)
                                 if (!isAvailable) {
@@ -152,7 +161,7 @@ fun ControlDeck(
 
             // Shutter row
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                // Gallery — Phase 2: always opens gallery grid
+                // Gallery — always opens gallery grid + Phase 4 a11y testTag
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -160,6 +169,8 @@ fun ControlDeck(
                         .border(2.dp, Color.White.copy(alpha = 0.2f), CircleShape)
                         .padding(2.dp)
                         .background(Color(0xFF1E293B))
+                        .testTag("gallery_button")
+                        .semantics { contentDescription = "Gallery" }
                         .clickable { onGalleryClick() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -170,11 +181,19 @@ fun ControlDeck(
                     }
                 }
 
-                // Shutter
+                // Shutter — Phase 4: haptic feedback + a11y
                 Box(
                     modifier = Modifier
                         .size(80.dp)
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onShutterClick() },
+                        .testTag("shutter_button")
+                        .semantics { contentDescription = "Shutter" }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onShutterClick()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Box(modifier = Modifier.fillMaxSize().border(4.dp, Color.White, CircleShape))
@@ -185,8 +204,18 @@ fun ControlDeck(
                     Box(modifier = Modifier.size(62.dp).scale(scaleValue).clip(if (isRecording && isVideoMode) RoundedCornerShape(10.dp) else CircleShape).background(color = if (isVideoMode) Color(0xFFEF4444) else Color.White))
                 }
 
-                // Flip
-                IconButton(onClick = onToggleCamera, modifier = Modifier.size(56.dp).background(Color.White.copy(alpha = 0.1f), CircleShape)) {
+                // Flip — Phase 4: haptic + testTag
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onToggleCamera()
+                    },
+                    modifier = Modifier
+                        .testTag("flip_camera_button")
+                        .semantics { contentDescription = "Switch camera" }
+                        .size(56.dp)
+                        .background(Color.White.copy(alpha = 0.1f), CircleShape)
+                ) {
                     Icon(imageVector = Icons.Default.Cameraswitch, contentDescription = "التبديل بين الكاميرات", tint = Color.White, modifier = Modifier.size(28.dp).graphicsLayer { rotationZ = rotationAngle })
                 }
             }

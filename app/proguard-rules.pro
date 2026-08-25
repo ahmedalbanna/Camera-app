@@ -16,6 +16,18 @@
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
 
+# Phase 4: R8 keep rules for CameraX, Media3, Coil, ML Kit, DataStore
+-keep class androidx.camera.** { *; }
+-keep class androidx.camera.extensions.** { *; }
+-keep class androidx.media3.** { *; }
+-keep class coil.** { *; }
+-keep class com.google.mlkit.** { *; }
+-keep class androidx.datastore.** { *; }
+-keep class com.example.BuildConfig { *; }
+-keep class com.example.CameraViewModel { *; }
+-keep class com.example.data.** { *; }
+-keep class androidx.profileinstaller.** { *; }
+
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile

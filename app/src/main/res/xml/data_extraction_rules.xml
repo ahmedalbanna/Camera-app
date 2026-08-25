@@ -1,17 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Phase 1.4: exclude app files/cache; MediaStore is system-managed -->
-        <exclude domain="file" path="." />
-        <exclude domain="cache" path="." />
-        <exclude domain="external" path="." />
         <include domain="sharedpref" path="." />
         <exclude domain="sharedpref" path="device.xml" />
     </cloud-backup>
     <device-transfer>
         <include domain="sharedpref" path="." />
         <exclude domain="sharedpref" path="device.xml" />
-        <exclude domain="file" path="." />
-        <exclude domain="cache" path="." />
     </device-transfer>
 </data-extraction-rules>

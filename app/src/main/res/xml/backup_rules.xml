@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Phase 1.4: No large media backup — camera app stores only in MediaStore, not in app-specific files -->
+<!-- Phase 4: Auto Backup — include sharedpref only (lint-clean), exclude device-specific -->
 <full-backup-content>
-    <exclude domain="file" path="." />
-    <exclude domain="cache" path="." />
-    <exclude domain="external" path="." />
-    <!-- Keep shared prefs for settings if any, but exclude device-specific -->
     <include domain="sharedpref" path="." />
     <exclude domain="sharedpref" path="device.xml" />
 </full-backup-content>

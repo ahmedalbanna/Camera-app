@@ -1,3 +1,102 @@
 <resources>
+    <!-- App name -->
     <string name="app_name">العدسة</string>
+
+    <!-- Permissions -->
+    <string name="permission_title">الوصول إلى الكاميرا</string>
+    <string name="permission_rationale">تطبيق العدسة بحاجة إلى صلاحيات الكاميرا والميكروفون لعرض البث الحي والتقاط الصور والفيديوهات وحفظها بجهازك.</string>
+    <string name="permission_rationale_settings">لقد رفضت الصلاحيات سابقاً. يرجى منحها يدوياً من الإعدادات لتمكين التصوير.</string>
+    <string name="permission_grant">منح الصلاحيات لبدء التصوير</string>
+    <string name="permission_open_settings">فتح الإعدادات</string>
+    <string name="permission_retry">محاولة مرة أخرى</string>
+    <string name="permission_denied_hint">بدون الصلاحيات لن تتمكن من استخدام الكاميرا.</string>
+
+    <!-- Camera modes -->
+    <string name="mode_panorama">بانوراما</string>
+    <string name="mode_photo">صورة</string>
+    <string name="mode_video">فيديو</string>
+    <string name="mode_portrait">بورتريه</string>
+    <string name="mode_pro">احترافي</string>
+
+    <!-- Controls -->
+    <string name="flash_auto">تلقائي (Auto)</string>
+    <string name="flash_on">تشغيل (On)</string>
+    <string name="flash_off">إيقاف (Off)</string>
+    <string name="grid_on">تشغيل الشبكة</string>
+    <string name="grid_off">إيقاف الشبكة</string>
+    <string name="zoom_unsupported">مستوى التقريب غير مدعوم على هذا الجهاز</string>
+    <string name="brightness">السطوع</string>
+    <string name="capture_panorama_hint">تم التقاط إطار بانورامي — اسحب ببطء</string>
+    <string name="panorama_coming">تطبيق البانوراما سيتم تفعيله لاحقاً بذكاء</string>
+    <string name="portrait_coming">تطبيق وضع البورتريه السينمائي قريباً جداً</string>
+
+    <!-- Shutter / Gallery -->
+    <string name="gallery_empty">معرض فارغ</string>
+    <string name="last_capture">آخر لقطة ملتقطة</string>
+    <string name="preview_fullscreen">معاينة الصورة ملء الشاشة</string>
+    <string name="video_label">مقطع فيديو</string>
+    <string name="photo_label">لقطة مصورة</string>
+    <string name="close_viewer">إغلاق المعارض</string>
+    <string name="back_to_camera">الرجوع للكاميرا</string>
+
+    <!-- Viewer / Delete -->
+    <string name="delete_capture">حذف اللقطة</string>
+    <string name="delete_title">حذف اللقطة؟</string>
+    <string name="delete_message">هل أنت متأكد من رغبتك في حذف هذا الملف نهائياً من ذاكرة جهازك؟</string>
+    <string name="delete_confirm">نعم، حذف</string>
+    <string name="cancel">إلغاء</string>
+    <string name="delete_cancelled">تم إلغاء الحذف</string>
+    <string name="delete_no_permission">لا يمكن حذف الملف: ليس لديك إذن</string>
+    <string name="delete_failed">فشل الحذف</string>
+
+    <!-- Pro -->
+    <string name="pro_title">وضع المحترف</string>
+    <string name="aperture">فتحة العدسة</string>
+    <string name="manual_focus">تركيز يدوي</string>
+    <string name="auto">تلقائي</string>
+    <string name="manual">يدوي</string>
+    <string name="hdr">HDR</string>
+
+    <!-- Panorama -->
+    <string name="horizon_level">مستوي</string>
+    <string name="panorama_progress">تقدم البانوراما</string>
+
+    <!-- AI -->
+    <string name="ai_title">الذكاء الاصطناعي — اختياري</string>
+    <string name="ai_desc">جميع الميزات الذكية متوقفة افتراضياً. عند التفعيل، يعمل التحليل محلياً أولاً (ML Kit) بدون إنترنت. Gemini يعمل فقط عند تفعيله + وجود مفتاح صالح + اتصال Wi-Fi، مع تسجيل كل استدعاء وعدم إرسال أي بيانات شخصية بدون موافقة.</string>
+    <string name="ai_enable">تفعيل المعالجة الذكية</string>
+    <string name="ai_enable_desc">السماح بالتحليل المحلي وتوليد الاقتراحات</string>
+    <string name="gemini_wifi">Gemini السحابي (Wi-Fi فقط)</string>
+    <string name="gemini_desc_valid">يتطلب مفتاح GEMINI_API_KEY صالح</string>
+    <string name="gemini_desc_invalid">المفتاح غير مُكوّن — سيعمل المحلي فقط</string>
+    <string name="smart_organize">التنظيم الذكي</string>
+    <string name="smart_organize_desc">وسوم تلقائية للمعرض (محلي أولاً)</string>
+    <string name="capture_assist">مساعد التكوين</string>
+    <string name="capture_assist_desc">اقتراح الشبكة والأفق قبل الالتقاط</string>
+    <string name="ai_key_hint">للتفعيل السحابي: أضف GEMINI_API_KEY في .env (انظر .env.example) أو عبر Secrets في AI Studio. العمل المحلي لا يحتاج مفتاح.</string>
+    <string name="ai_save">حفظ</string>
+    <string name="ai_close">إغلاق</string>
+    <string name="scene_analyzing">تحليل المشهد...</string>
+    <string name="capture_suggest_portrait">جرّب وضع البورتريه لتمويه الخلفية</string>
+    <string name="capture_suggest_panorama">جرّب البانوراما للمشهد الواسع</string>
+    <string name="capture_suggest_grid">حافظ على الأفق مستوياً — الشبكة تساعد</string>
+    <string name="smart_describe">وصف ذكي</string>
+    <string name="smart_describing">جاري الوصف...</string>
+    <string name="smart_describe_enable">فعّل الذكاء للوصف</string>
+    <string name="activate">تفعيل</string>
+
+    <!-- Gallery -->
+    <string name="gallery_title">المعرض</string>
+    <string name="gallery_empty_hint">لا توجد وسائط بعد</string>
+    <string name="gallery_video">فيديو</string>
+
+    <!-- A11y -->
+    <string name="cd_flash_selector">اختيار الفلاش</string>
+    <string name="cd_grid_toggle">تبديل الشبكة</string>
+    <string name="cd_switch_camera">التبديل بين الكاميرات</string>
+    <string name="cd_shutter">زر الالتقاط</string>
+    <string name="cd_gallery">معرض الصور</string>
+    <string name="cd_ai">إعدادات الذكاء</string>
+    <string name="cd_close">إغلاق</string>
+    <string name="cd_delete">حذف</string>
 </resources>

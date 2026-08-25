@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -18,8 +17,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,9 +39,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -61,6 +64,7 @@ import com.example.ui.components.SceneBadge
 import com.example.ui.components.TopBar
 import com.example.ui.theme.AmberGolden
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun CameraScreen(
@@ -104,7 +108,6 @@ fun CameraScreen(
     var isViewerOpen by remember { mutableStateOf(false) }
     var viewerUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var showGridLines by remember { mutableStateOf(false) }
-    var announcementText by remember { mutableStateOf<String?>(null) }
     var rotationAngle by remember { mutableStateOf(0f) }
     var showConsentSheet by remember { mutableStateOf(false) }
 
@@ -112,18 +115,12 @@ fun CameraScreen(
     var zoomRange by remember { mutableStateOf<ClosedFloatingPointRange<Float>?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(errorMessage) {
         errorMessage?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.consumeErrorMessage()
-        }
-    }
-
-    LaunchedEffect(announcementText) {
-        if (announcementText != null) {
-            delay(2000)
-            announcementText = null
         }
     }
 
@@ -161,16 +158,24 @@ fun CameraScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Grid
+        // Grid — Phase 4: drawWithCache for perf
         if (showGridLines) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val h = size.height
-                drawLine(Color.White.copy(alpha = 0.25f), Offset(w / 3f, 0f), Offset(w / 3f, h), strokeWidth = 1.dp.toPx())
-                drawLine(Color.White.copy(alpha = 0.25f), Offset(w * 2f / 3f, 0f), Offset(w * 2f / 3f, h), strokeWidth = 1.dp.toPx())
-                drawLine(Color.White.copy(alpha = 0.25f), Offset(0f, h / 3f), Offset(w, h / 3f), strokeWidth = 1.dp.toPx())
-                drawLine(Color.White.copy(alpha = 0.25f), Offset(0f, h * 2f / 3f), Offset(w, h * 2f / 3f), strokeWidth = 1.dp.toPx())
-            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithCache {
+                        val stroke = 1.dp.toPx()
+                        val w = size.width
+                        val h = size.height
+                        val color = Color.White.copy(alpha = 0.25f)
+                        onDrawBehind {
+                            drawLine(color, Offset(w / 3f, 0f), Offset(w / 3f, h), strokeWidth = stroke)
+                            drawLine(color, Offset(w * 2f / 3f, 0f), Offset(w * 2f / 3f, h), strokeWidth = stroke)
+                            drawLine(color, Offset(0f, h / 3f), Offset(w, h / 3f), strokeWidth = stroke)
+                            drawLine(color, Offset(0f, h * 2f / 3f), Offset(w, h * 2f / 3f), strokeWidth = stroke)
+                        }
+                    }
+            )
         }
 
         // Focus bracket
@@ -300,23 +305,10 @@ fun CameraScreen(
             onCloseFlashMenu = { viewModel.closeFlashMenu() },
             onSetFlashMode = { viewModel.setFlashMode(it) },
             onToggleGrid = { showGridLines = !showGridLines },
-            modifier = Modifier.align(Alignment.TopCenter)
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
         )
 
         SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 180.dp))
-
-        AnimatedVisibility(
-            visible = announcementText != null,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 260.dp)
-        ) {
-            Box(
-                modifier = Modifier.background(Color(0xFF131D31).copy(alpha = 0.9f), RoundedCornerShape(12.dp)).border(1.dp, Color(0xFFFBBF24).copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(horizontal = 20.dp, vertical = 10.dp)
-            ) {
-                Text(text = announcementText ?: "", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            }
-        }
 
         if (cameraMode == CameraMode.PRO) {
             ProControls(
@@ -339,12 +331,14 @@ fun CameraScreen(
             snackbarHostState = snackbarHostState,
             onSetZoomRatio = { viewModel.setZoomRatio(it) },
             onSetCameraMode = { viewModel.setCameraMode(it) },
-            onAnnounce = { announcementText = it },
+            onAnnounce = { scope.launch { snackbarHostState.showSnackbar(it) } },
             onGalleryClick = { viewModel.setGalleryOpen(true) },
             onShutterClick = {
                 if (cameraMode == CameraMode.VIDEO) onToggleVideo(videoCaptureInstance)
                 else {
-                    if (cameraMode == CameraMode.PANORAMA) announcementText = "تم التقاط إطار بانورامي — اسحب ببطء"
+                    if (cameraMode == CameraMode.PANORAMA) {
+                        scope.launch { snackbarHostState.showSnackbar("تم التقاط إطار بانورامي — اسحب ببطء") }
+                    }
                     onTakePhoto(imageCaptureInstance)
                 }
             },
@@ -353,7 +347,7 @@ fun CameraScreen(
                 viewModel.toggleCamera()
             },
             rotationAngle = rotationAngle,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
         )
 
         // Viewer
